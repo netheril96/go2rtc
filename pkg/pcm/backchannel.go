@@ -2,6 +2,7 @@ package pcm
 
 import (
 	"errors"
+	"syscall"
 
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/shell"
@@ -66,4 +67,8 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 
 func (c *Backchannel) Start() error {
 	return c.cmd.Run()
+}
+
+func (c *Backchannel) Stop() error {
+	return c.cmd.Process.Signal(syscall.SIGTERM)
 }
