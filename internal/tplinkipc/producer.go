@@ -102,7 +102,13 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm chan []byte, quitSignal ch
 	}
 	defer func() {
 		ffmpegCmd.Process.Signal(syscall.SIGTERM)
-		ffmpegCmd.Wait()
+		exitErr := ffmpegCmd.Wait()
+		if exitErr != nil {
+			log.Warn().Err(exitErr).Msg("ffmpeg exited abnormally")
+		} else {
+			log.Debug().Msg("ffmpeg exited normally")
+		}
+		quitSignal <- struct{}{}
 	}()
 
 	talk := NewTplinkTalkConnection(
