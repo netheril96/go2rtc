@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -60,8 +61,9 @@ func execHandle(rawURL string) (prod core.Producer, err error) {
 
 type Backchannel struct {
 	core.Connection
-	url      *url.URL
-	sessions []*session
+	url     *url.URL
+	session *session
+	mu      sync.Mutex
 }
 
 type session struct {
@@ -114,6 +116,7 @@ func newSession(url *url.URL, codec *core.Codec) (*session, error) {
 		bufio.NewReadWriter(bufio.NewReader(s.conn), bufio.NewWriter(s.conn)),
 		url.User.Username(), passwd, 0,
 	)
+	success = true
 	return s, nil
 }
 
@@ -158,6 +161,18 @@ func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Rece
 }
 
 func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.session != nil {
+		log.Debug().Msg("Closing previous session")
+		localErr := c.session.Close()
+		if localErr != nil {
+			log.Err(localErr).Msg("failed to close previous session")
+		}
+		c.session = nil
+	}
+
 	s, err := newSession(c.url, track.Codec)
 	if err != nil {
 		return fmt.Errorf("new session: %w", err)
@@ -166,10 +181,10 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 	defer func() {
 		if !success {
 			s.Close()
-		} else {
-			c.sessions = append(c.sessions, s)
+			c.session = nil
 		}
 	}()
+	c.session = s
 
 	sender := core.NewSender(media, track.Codec)
 	dec, err := opus2.NewDecoder(int(track.Codec.ClockRate), int(track.Codec.Channels))
@@ -206,7 +221,29 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 		}
 	}()
 
+	timer := time.AfterFunc(10*time.Second, func() {
+		c.mu.Lock()
+		if c.session == s {
+			log.Debug().Msg("Closing session due to to timeout")
+			localErr := c.session.Close()
+			if localErr != nil {
+				log.Err(localErr).Msg("failed to close previous session")
+			}
+			c.session = nil
+			sender.Close()
+			for i, item := range c.Senders {
+				if item == sender {
+					c.Senders = append(c.Senders[:i], c.Senders[i+1:]...)
+					break
+				}
+			}
+		}
+		c.mu.Unlock()
+	})
+
 	sender.Handler = func(packet *rtp.Packet) {
+		timer.Reset(10 * time.Second)
+
 		n, err := dec.Decode(packet.Payload, pcm)
 		if err != nil {
 			log.Err(err).Msg("Decoding packet failed")
@@ -229,18 +266,27 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 }
 
 func (c *Backchannel) Start() error {
-	errs := make([]error, 0, len(c.sessions))
-	for _, s := range c.sessions {
-		if err := s.ffmpegCmd.Wait(); err != nil {
-			errs = append(errs, fmt.Errorf("ffmpeg wait: %w", err))
-		}
+	c.mu.Lock()
+	s := c.session
+	c.mu.Unlock()
+
+	if s == nil {
+		return nil
 	}
-	return errors.Join(errs...)
+	if err := s.ffmpegCmd.Wait(); err != nil {
+		return fmt.Errorf("ffmpeg wait: %w", err)
+	}
+	return nil
 }
 
 func (c *Backchannel) Stop() error {
-	errs := make([]error, 0, len(c.sessions)+1)
-	for _, s := range c.sessions {
+	c.mu.Lock()
+	s := c.session
+	c.session = nil
+	c.mu.Unlock()
+
+	var errs []error
+	if s != nil {
 		if err := s.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("session close: %w", err))
 		}
