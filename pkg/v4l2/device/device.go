@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"unsafe"
 )
+import "C"
 
 type Device struct {
 	fd     int

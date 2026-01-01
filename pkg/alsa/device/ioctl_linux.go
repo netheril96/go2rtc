@@ -6,6 +6,8 @@ import (
 	"syscall"
 )
 
+import "C"
+
 func ioctl(fd, req uintptr, arg any) error {
 	var ptr uintptr
 	if arg != nil {
