@@ -1,7 +1,12 @@
 package tplinkipc
 
 import (
+	"bufio"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
 
 	"github.com/AlexxIT/go2rtc/internal/app"
@@ -20,10 +25,31 @@ func Init() {
 }
 
 func execHandle(rawURL string) (prod core.Producer, err error) {
-	// _, err = url.Parse(rawURL)
-	// if err != nil {
-	// 	return
-	// }
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return
+	}
+
+	conn, err := net.Dial("tcp", u.Host)
+	if err != nil {
+		return
+	}
+	success := false
+	defer func() {
+		if !success {
+			conn.Close()
+		}
+	}()
+
+	passwd, set := u.User.Password()
+	if !set {
+		return nil, fmt.Errorf("Password not set for user %s", u.User.Username())
+	}
+
+	talk := NewTplinkTalkConnection(
+		bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+		u.User.Username(), passwd, 0,
+	)
 
 	medias := []*core.Media{
 		{
@@ -40,11 +66,16 @@ func execHandle(rawURL string) (prod core.Producer, err error) {
 			Protocol:   "pipe+tcp",
 			Medias:     medias,
 		},
+		conn:    conn,
+		talk:    talk,
+		waiting: func() {},
 	}, nil
 }
 
 type Backchannel struct {
 	core.Connection
+	conn    net.Conn
+	talk    *TplinkTalkConnection
 	waiting func()
 }
 
@@ -90,5 +121,8 @@ func (c *Backchannel) Start() error {
 }
 
 func (c *Backchannel) Stop() error {
-	return c.Connection.Stop()
+	err1 := c.Connection.Stop()
+	err2 := c.talk.Stop()
+	err3 := c.conn.Close()
+	return errors.Join(err1, err2, err3)
 }
