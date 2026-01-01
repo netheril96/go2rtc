@@ -31,7 +31,7 @@ func Init() {
 func execHandle(rawURL string) (prod core.Producer, err error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return
+		return nil, fmt.Errorf("parse url %s: %w", rawURL, err)
 	}
 
 	_, set := u.User.Password()
@@ -87,7 +87,7 @@ func newSession(url *url.URL, codec *core.Codec) (*session, error) {
 	var err error
 	s.conn, err = net.Dial("tcp", url.Host)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial tcp to host %s: %w", url.Host, err)
 	}
 	passwd, _ := url.User.Password()
 
@@ -101,13 +101,13 @@ func newSession(url *url.URL, codec *core.Codec) (*session, error) {
 	s.ffmpegCmd.Stderr = os.Stderr
 
 	if s.ffmpegStdIn, err = s.ffmpegCmd.StdinPipe(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ffmpeg stdin: %w", err)
 	}
 	if s.ffmpegStdOut, err = s.ffmpegCmd.StdoutPipe(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ffmpeg stdout: %w", err)
 	}
 	if err = s.ffmpegCmd.Start(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ffmpeg start: %w", err)
 	}
 
 	s.talk = NewTplinkTalkConnection(
@@ -120,24 +120,33 @@ func newSession(url *url.URL, codec *core.Codec) (*session, error) {
 func (s *session) Close() error {
 	errs := make([]error, 0, 5)
 	if s.talk != nil {
-		errs = append(errs, s.talk.Stop())
+		if err := s.talk.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("talk stop: %w", err))
+		}
 		s.talk = nil
 	}
 	if s.ffmpegCmd != nil {
 		if s.ffmpegCmd.Process != nil {
-			errs = append(errs, s.ffmpegCmd.Process.Signal(syscall.SIGTERM))
+			ffmpegCmd := s.ffmpegCmd
+			if err := ffmpegCmd.Process.Signal(syscall.SIGTERM); err != nil {
+				errs = append(errs, fmt.Errorf("ffmpeg signal: %w", err))
+			}
 			go func() {
-				s.ffmpegCmd.Wait()
+				ffmpegCmd.Wait()
 			}()
 		}
 		s.ffmpegCmd = nil
 	}
 	if s.ffmpegStdOut != nil {
-		errs = append(errs, s.ffmpegStdOut.Close())
+		if err := s.ffmpegStdOut.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("ffmpeg stdout close: %w", err))
+		}
 		s.ffmpegStdOut = nil
 	}
 	if s.ffmpegStdIn != nil {
-		errs = append(errs, s.ffmpegStdIn.Close())
+		if err := s.ffmpegStdIn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("ffmpeg stdin close: %w", err))
+		}
 		s.ffmpegStdIn = nil
 	}
 
@@ -151,7 +160,7 @@ func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Rece
 func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
 	s, err := newSession(c.url, track.Codec)
 	if err != nil {
-		return err
+		return fmt.Errorf("new session: %w", err)
 	}
 	success := false
 	defer func() {
@@ -165,14 +174,14 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 	sender := core.NewSender(media, track.Codec)
 	dec, err := opus2.NewDecoder(int(track.Codec.ClockRate), int(track.Codec.Channels))
 	if err != nil {
-		return err
+		return fmt.Errorf("opus decoder: %w", err)
 	}
 	pcm := make([]int16, 1<<15)
 	pcm_bytes := make([]byte, 2<<15)
 
 	err = s.talk.Start()
 	if err != nil {
-		return err
+		return fmt.Errorf("talk start: %w", err)
 	}
 	go func() {
 		ticker := time.NewTicker(time.Second / 16)
@@ -222,7 +231,9 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 func (c *Backchannel) Start() error {
 	errs := make([]error, 0, len(c.sessions))
 	for _, s := range c.sessions {
-		errs = append(errs, s.ffmpegCmd.Wait())
+		if err := s.ffmpegCmd.Wait(); err != nil {
+			errs = append(errs, fmt.Errorf("ffmpeg wait: %w", err))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -230,8 +241,13 @@ func (c *Backchannel) Start() error {
 func (c *Backchannel) Stop() error {
 	errs := make([]error, 0, len(c.sessions)+1)
 	for _, s := range c.sessions {
-		errs = append(errs, s.Close())
+		if err := s.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("session close: %w", err))
+		}
 	}
-	errs = append(errs, c.Connection.Stop())
+	c.sessions = nil
+	if err := c.Connection.Stop(); err != nil {
+		errs = append(errs, fmt.Errorf("connection stop: %w", err))
+	}
 	return errors.Join(errs...)
 }
