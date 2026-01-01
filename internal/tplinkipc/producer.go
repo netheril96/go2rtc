@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/internal/app"
@@ -33,47 +34,10 @@ func execHandle(rawURL string) (prod core.Producer, err error) {
 		return
 	}
 
-	conn, err := net.Dial("tcp", u.Host)
-	if err != nil {
-		return
-	}
-	success := false
-	defer func() {
-		if !success {
-			conn.Close()
-		}
-	}()
-
-	passwd, set := u.User.Password()
+	_, set := u.User.Password()
 	if !set {
 		return nil, fmt.Errorf("Password not set for user %s", u.User.Username())
 	}
-
-	ffmpegCmd := exec.Command(
-		"ffmpeg",
-		"-hide_banner", "-v", "error",
-		"-fflags", "nobuffer", "-flags", "low_delay",
-		"-f", "s16le", "-ar", "48000", "-ac", "2", "-i", "-",
-		"-f", "mulaw", "-ar", "16000", "-ac", "1", "-",
-	)
-	ffmpegCmd.Stderr = os.Stderr
-	ffmpegStdIn, err := ffmpegCmd.StdinPipe()
-	if err != nil {
-		return
-	}
-	ffmpegStdOut, err := ffmpegCmd.StdoutPipe()
-	if err != nil {
-		return
-	}
-	err = ffmpegCmd.Start()
-	if err != nil {
-		return
-	}
-
-	talk := NewTplinkTalkConnection(
-		bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
-		u.User.Username(), passwd, 0,
-	)
 
 	medias := []*core.Media{
 		{
@@ -83,8 +47,6 @@ func execHandle(rawURL string) (prod core.Producer, err error) {
 		},
 	}
 
-	success = true
-
 	return &Backchannel{
 		Connection: core.Connection{
 			ID:         core.NewID(),
@@ -92,23 +54,18 @@ func execHandle(rawURL string) (prod core.Producer, err error) {
 			Protocol:   "pipe+tcp",
 			Medias:     medias,
 		},
-		conn:         conn,
-		talk:         talk,
-		ffmpegCmd:    ffmpegCmd,
-		ffmpegStdIn:  ffmpegStdIn,
-		ffmpegStdOut: ffmpegStdOut,
-		waiting:      func() {},
+		url: u,
 	}, nil
 }
 
 type Backchannel struct {
 	core.Connection
+	url          *url.URL
 	conn         net.Conn
 	talk         *TplinkTalkConnection
 	ffmpegCmd    *exec.Cmd
 	ffmpegStdIn  io.WriteCloser
 	ffmpegStdOut io.ReadCloser
-	waiting      func()
 }
 
 func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Receiver, error) {
@@ -116,6 +73,52 @@ func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Rece
 }
 
 func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
+	if c.conn == nil {
+		conn, err := net.Dial("tcp", c.url.Host)
+		if err != nil {
+			return err
+		}
+		c.conn = conn
+
+		success := false
+		defer func() {
+			if !success {
+				localErr := c.conn.Close()
+				if localErr != nil {
+					log.Err(localErr).Msg("Failed to close network connection")
+				}
+				c.conn = nil
+			}
+		}()
+
+		passwd, _ := c.url.User.Password()
+
+		c.ffmpegCmd = exec.Command(
+			"ffmpeg",
+			"-hide_banner", "-v", "error",
+			"-fflags", "nobuffer", "-flags", "low_delay",
+			"-f", "s16le", "-ar", fmt.Sprint(track.Codec.ClockRate), "-ac", fmt.Sprint(track.Codec.Channels), "-i", "-",
+			"-f", "mulaw", "-ar", "16000", "-ac", "1", "-",
+		)
+		c.ffmpegCmd.Stderr = os.Stderr
+
+		if c.ffmpegStdIn, err = c.ffmpegCmd.StdinPipe(); err != nil {
+			return err
+		}
+		if c.ffmpegStdOut, err = c.ffmpegCmd.StdoutPipe(); err != nil {
+			return err
+		}
+		if err = c.ffmpegCmd.Start(); err != nil {
+			return err
+		}
+
+		c.talk = NewTplinkTalkConnection(
+			bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+			c.url.User.Username(), passwd, 0,
+		)
+		success = true
+	}
+
 	sender := core.NewSender(media, track.Codec)
 	dec, err := opus2.NewDecoder(int(track.Codec.ClockRate), int(track.Codec.Channels))
 	if err != nil {
@@ -164,21 +167,35 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 	}
 	sender.HandleRTP(track)
 	c.Senders = append(c.Senders, sender)
-	c.waiting = func() {
-		sender.Wait()
-	}
 	return nil
 }
 
 func (c *Backchannel) Start() error {
-	c.waiting()
-	return nil
+	return c.ffmpegCmd.Wait()
 }
 
 func (c *Backchannel) Stop() error {
-	err1 := c.Connection.Stop()
-	err2 := c.talk.Stop()
-	err3 := c.conn.Close()
-
-	return errors.Join(err1, err2, err3)
+	errs := make([]error, 0, 4)
+	if c.ffmpegCmd != nil {
+		errs = append(errs, c.ffmpegCmd.Process.Signal(syscall.SIGTERM))
+		c.ffmpegCmd = nil
+	}
+	if c.talk != nil {
+		errs = append(errs, c.talk.Stop())
+		c.talk = nil
+	}
+	if c.ffmpegStdIn != nil {
+		errs = append(errs, c.ffmpegStdIn.Close())
+		c.ffmpegStdIn = nil
+	}
+	if c.ffmpegStdOut != nil {
+		errs = append(errs, c.ffmpegStdOut.Close())
+		c.ffmpegStdOut = nil
+	}
+	if c.conn != nil {
+		errs = append(errs, c.conn.Close())
+		c.conn = nil
+	}
+	errs = append(errs, c.Connection.Stop())
+	return errors.Join(errs...)
 }
