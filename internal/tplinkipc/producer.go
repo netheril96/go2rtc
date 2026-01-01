@@ -60,7 +60,11 @@ func execHandle(rawURL string) (prod core.Producer, err error) {
 
 type Backchannel struct {
 	core.Connection
-	url          *url.URL
+	url      *url.URL
+	sessions []*session
+}
+
+type session struct {
 	conn         net.Conn
 	talk         *TplinkTalkConnection
 	ffmpegCmd    *exec.Cmd
@@ -68,56 +72,95 @@ type Backchannel struct {
 	ffmpegStdOut io.ReadCloser
 }
 
+func newSession(url *url.URL, codec *core.Codec) (*session, error) {
+	s := &session{}
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		localErr := s.Close()
+		if localErr != nil {
+			log.Err(localErr).Msg("Failed to close session")
+		}
+	}()
+	var err error
+	s.conn, err = net.Dial("tcp", url.Host)
+	if err != nil {
+		return nil, err
+	}
+	passwd, _ := url.User.Password()
+
+	s.ffmpegCmd = exec.Command(
+		"ffmpeg",
+		"-hide_banner", "-v", "error",
+		"-fflags", "nobuffer", "-flags", "low_delay",
+		"-f", "s16le", "-ar", fmt.Sprint(codec.ClockRate), "-ac", fmt.Sprint(codec.Channels), "-i", "-",
+		"-f", "mulaw", "-ar", "16000", "-ac", "1", "-",
+	)
+	s.ffmpegCmd.Stderr = os.Stderr
+
+	if s.ffmpegStdIn, err = s.ffmpegCmd.StdinPipe(); err != nil {
+		return nil, err
+	}
+	if s.ffmpegStdOut, err = s.ffmpegCmd.StdoutPipe(); err != nil {
+		return nil, err
+	}
+	if err = s.ffmpegCmd.Start(); err != nil {
+		return nil, err
+	}
+
+	s.talk = NewTplinkTalkConnection(
+		bufio.NewReadWriter(bufio.NewReader(s.conn), bufio.NewWriter(s.conn)),
+		url.User.Username(), passwd, 0,
+	)
+	return s, nil
+}
+
+func (s *session) Close() error {
+	errs := make([]error, 0, 5)
+	if s.talk != nil {
+		errs = append(errs, s.talk.Stop())
+		s.talk = nil
+	}
+	if s.ffmpegCmd != nil {
+		if s.ffmpegCmd.Process != nil {
+			errs = append(errs, s.ffmpegCmd.Process.Signal(syscall.SIGTERM))
+			go func() {
+				s.ffmpegCmd.Wait()
+			}()
+		}
+		s.ffmpegCmd = nil
+	}
+	if s.ffmpegStdOut != nil {
+		errs = append(errs, s.ffmpegStdOut.Close())
+		s.ffmpegStdOut = nil
+	}
+	if s.ffmpegStdIn != nil {
+		errs = append(errs, s.ffmpegStdIn.Close())
+		s.ffmpegStdIn = nil
+	}
+
+	return errors.Join(errs...)
+}
+
 func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Receiver, error) {
 	return nil, core.ErrCantGetTrack
 }
 
 func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
-	if c.conn == nil {
-		conn, err := net.Dial("tcp", c.url.Host)
-		if err != nil {
-			return err
-		}
-		c.conn = conn
-
-		success := false
-		defer func() {
-			if !success {
-				localErr := c.conn.Close()
-				if localErr != nil {
-					log.Err(localErr).Msg("Failed to close network connection")
-				}
-				c.conn = nil
-			}
-		}()
-
-		passwd, _ := c.url.User.Password()
-
-		c.ffmpegCmd = exec.Command(
-			"ffmpeg",
-			"-hide_banner", "-v", "error",
-			"-fflags", "nobuffer", "-flags", "low_delay",
-			"-f", "s16le", "-ar", fmt.Sprint(track.Codec.ClockRate), "-ac", fmt.Sprint(track.Codec.Channels), "-i", "-",
-			"-f", "mulaw", "-ar", "16000", "-ac", "1", "-",
-		)
-		c.ffmpegCmd.Stderr = os.Stderr
-
-		if c.ffmpegStdIn, err = c.ffmpegCmd.StdinPipe(); err != nil {
-			return err
-		}
-		if c.ffmpegStdOut, err = c.ffmpegCmd.StdoutPipe(); err != nil {
-			return err
-		}
-		if err = c.ffmpegCmd.Start(); err != nil {
-			return err
-		}
-
-		c.talk = NewTplinkTalkConnection(
-			bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
-			c.url.User.Username(), passwd, 0,
-		)
-		success = true
+	s, err := newSession(c.url, track.Codec)
+	if err != nil {
+		return err
 	}
+	success := false
+	defer func() {
+		if !success {
+			s.Close()
+		} else {
+			c.sessions = append(c.sessions, s)
+		}
+	}()
 
 	sender := core.NewSender(media, track.Codec)
 	dec, err := opus2.NewDecoder(int(track.Codec.ClockRate), int(track.Codec.Channels))
@@ -125,7 +168,9 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 		return err
 	}
 	pcm := make([]int16, 1<<15)
-	err = c.talk.Start()
+	pcm_bytes := make([]byte, 2<<15)
+
+	err = s.talk.Start()
 	if err != nil {
 		return err
 	}
@@ -135,12 +180,16 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 		buf := make([]byte, 1000)
 		for {
 			<-ticker.C
-			n, err := c.ffmpegStdOut.Read(buf)
+			n, err := s.ffmpegStdOut.Read(buf)
 			if err != nil {
+				if errors.Is(err, io.EOF) {
+					log.Debug().Msg("Audio stream EOF, exiting normally...")
+					return
+				}
 				log.Err(err).Msg("Reading from ffmpeg failed")
 				return
 			}
-			err = c.talk.SendPcm(buf[:n])
+			err = s.talk.SendPcm(buf[:n])
 			if err != nil {
 				log.Err(err).Msg("Sending to talk failed")
 				return
@@ -155,11 +204,10 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 			return
 		}
 		size := n * int(track.Codec.Channels)
-		buf := make([]byte, size*2)
 		for i := range size {
-			binary.LittleEndian.PutUint16(buf[i*2:], uint16(pcm[i]))
+			binary.LittleEndian.PutUint16(pcm_bytes[i*2:], uint16(pcm[i]))
 		}
-		n, err = c.ffmpegStdIn.Write(buf)
+		n, err = s.ffmpegStdIn.Write(pcm_bytes[:size])
 		if err != nil {
 			log.Err(err).Msg("Piping to ffmpeg failed")
 			return
@@ -167,34 +215,22 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 	}
 	sender.HandleRTP(track)
 	c.Senders = append(c.Senders, sender)
+	success = true
 	return nil
 }
 
 func (c *Backchannel) Start() error {
-	return c.ffmpegCmd.Wait()
+	errs := make([]error, 0, len(c.sessions))
+	for _, s := range c.sessions {
+		errs = append(errs, s.ffmpegCmd.Wait())
+	}
+	return errors.Join(errs...)
 }
 
 func (c *Backchannel) Stop() error {
-	errs := make([]error, 0, 4)
-	if c.ffmpegCmd != nil {
-		errs = append(errs, c.ffmpegCmd.Process.Signal(syscall.SIGTERM))
-		c.ffmpegCmd = nil
-	}
-	if c.talk != nil {
-		errs = append(errs, c.talk.Stop())
-		c.talk = nil
-	}
-	if c.ffmpegStdIn != nil {
-		errs = append(errs, c.ffmpegStdIn.Close())
-		c.ffmpegStdIn = nil
-	}
-	if c.ffmpegStdOut != nil {
-		errs = append(errs, c.ffmpegStdOut.Close())
-		c.ffmpegStdOut = nil
-	}
-	if c.conn != nil {
-		errs = append(errs, c.conn.Close())
-		c.conn = nil
+	errs := make([]error, 0, len(c.sessions)+1)
+	for _, s := range c.sessions {
+		errs = append(errs, s.Close())
 	}
 	errs = append(errs, c.Connection.Stop())
 	return errors.Join(errs...)
