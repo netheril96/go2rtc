@@ -68,7 +68,7 @@ type Backchannel struct {
 	quitSignal atomic.Pointer[chan struct{}]
 }
 
-func loop(url *url.URL, codec *core.Codec, decodedPcm chan []byte, quitSignal chan struct{}) error {
+func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal chan struct{}) error {
 	conn, err := net.Dial("tcp", url.Host)
 	if err != nil {
 		return fmt.Errorf("dial tcp to host %s: %w", url.Host, err)
@@ -170,17 +170,18 @@ func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Rece
 }
 
 func (c *Backchannel) reinitQuitSignal() chan struct{} {
-	newSignal := make(chan struct{})
+	newSignal := make(chan struct{}, 15)
 	oldSignal := c.quitSignal.Swap(&newSignal)
-	if oldSignal != nil {
+	if oldSignal != nil && *oldSignal != nil {
 		log.Debug().Msg("Closing previous session")
 		*oldSignal <- struct{}{}
+		close(*oldSignal)
 	}
 	return newSignal
 }
 
 func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
-	decodedChannel := make(chan []byte)
+	decodedChannel := make(chan []byte, 5)
 	quitSignal := c.reinitQuitSignal()
 
 	c.wg.Go(func() {
@@ -222,8 +223,9 @@ func (c *Backchannel) Start() error {
 
 func (c *Backchannel) Stop() error {
 	oldSignal := c.quitSignal.Swap(nil)
-	if oldSignal != nil {
+	if oldSignal != nil && *oldSignal != nil {
 		*oldSignal <- struct{}{}
+		close(*oldSignal)
 	}
 	return nil
 }
