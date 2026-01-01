@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -63,9 +64,8 @@ type Backchannel struct {
 	core.Connection
 	url *url.URL
 
-	mu         sync.Mutex
 	wg         sync.WaitGroup
-	quitSignal chan struct{}
+	quitSignal atomic.Pointer[chan struct{}]
 }
 
 func loop(url *url.URL, codec *core.Codec, decodedPcm chan []byte, quitSignal chan struct{}) error {
@@ -164,17 +164,13 @@ func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Rece
 }
 
 func (c *Backchannel) reinitQuitSignal() chan struct{} {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.quitSignal != nil {
+	newSignal := make(chan struct{})
+	oldSignal := c.quitSignal.Swap(&newSignal)
+	if oldSignal != nil {
 		log.Debug().Msg("Closing previous session")
-
-		c.quitSignal <- struct{}{}
-		c.quitSignal = nil
+		*oldSignal <- struct{}{}
 	}
-	c.quitSignal = make(chan struct{})
-	return c.quitSignal
+	return newSignal
 }
 
 func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
@@ -219,12 +215,9 @@ func (c *Backchannel) Start() error {
 }
 
 func (c *Backchannel) Stop() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.quitSignal != nil {
-		c.quitSignal <- struct{}{}
-		c.quitSignal = nil
+	oldSignal := c.quitSignal.Swap(nil)
+	if oldSignal != nil {
+		*oldSignal <- struct{}{}
 	}
 	return nil
 }
