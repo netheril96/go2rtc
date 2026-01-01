@@ -108,7 +108,10 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal 
 		} else {
 			log.Debug().Msg("ffmpeg exited normally")
 		}
-		quitSignal <- struct{}{}
+		select {
+		case quitSignal <- struct{}{}:
+		default:
+		}
 	}()
 
 	talk := NewTplinkTalkConnection(
@@ -123,7 +126,12 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal 
 	defer talk.Stop()
 
 	go func() {
-		defer func() { quitSignal <- struct{}{} }()
+		defer func() {
+			select {
+			case quitSignal <- struct{}{}:
+			default:
+			}
+		}()
 		ticker := time.NewTicker(time.Second / 16)
 		defer ticker.Stop()
 		buf := make([]byte, 1000)
@@ -170,11 +178,14 @@ func (c *Backchannel) GetTrack(media *core.Media, codec *core.Codec) (*core.Rece
 }
 
 func (c *Backchannel) reinitQuitSignal() chan struct{} {
-	newSignal := make(chan struct{}, 15)
+	newSignal := make(chan struct{}, 5)
 	oldSignal := c.quitSignal.Swap(&newSignal)
 	if oldSignal != nil && *oldSignal != nil {
 		log.Debug().Msg("Closing previous session")
-		*oldSignal <- struct{}{}
+		select {
+		case *oldSignal <- struct{}{}:
+		default:
+		}
 		close(*oldSignal)
 	}
 	return newSignal
@@ -224,7 +235,10 @@ func (c *Backchannel) Start() error {
 func (c *Backchannel) Stop() error {
 	oldSignal := c.quitSignal.Swap(nil)
 	if oldSignal != nil && *oldSignal != nil {
-		*oldSignal <- struct{}{}
+		select {
+		case *oldSignal <- struct{}{}:
+		default:
+		}
 		close(*oldSignal)
 	}
 	return nil
