@@ -101,16 +101,20 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal 
 		return fmt.Errorf("ffmpeg start: %w", err)
 	}
 	defer func() {
-		ffmpegCmd.Process.Signal(syscall.SIGTERM)
+		log.Debug().Msg("Sending SIGINT to ffmpeg")
+		ffmpegCmd.Process.Signal(syscall.SIGINT)
+		time.Sleep(time.Millisecond * 100)
+		ffmpegCmd.Process.Signal(syscall.SIGINT)
+		time.Sleep(time.Millisecond * 100)
+
+		ffmpegStdIn.Close()
+		ffmpegStdOut.Close()
+
 		exitErr := ffmpegCmd.Wait()
 		if exitErr != nil {
 			log.Warn().Err(exitErr).Msg("ffmpeg exited abnormally")
 		} else {
 			log.Debug().Msg("ffmpeg exited normally")
-		}
-		select {
-		case quitSignal <- struct{}{}:
-		default:
 		}
 	}()
 
@@ -143,6 +147,10 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal 
 					log.Debug().Msg("Audio stream EOF, exiting normally...")
 					return
 				}
+				if errors.Is(err, os.ErrClosed) {
+					log.Debug().Msg("Audio stream closed, exiting normally...")
+					return
+				}
 				log.Err(err).Msg("Reading from ffmpeg failed")
 				return
 			}
@@ -157,6 +165,7 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal 
 	for {
 		select {
 		case <-quitSignal:
+			log.Debug().Msg("Received quit signal so quiting the loop")
 			return nil
 		case pcm, ok := <-decodedPcm:
 			if !ok {
@@ -186,7 +195,6 @@ func (c *Backchannel) reinitQuitSignal() chan struct{} {
 		case *oldSignal <- struct{}{}:
 		default:
 		}
-		close(*oldSignal)
 	}
 	return newSignal
 }
@@ -228,18 +236,22 @@ func (c *Backchannel) AddTrack(media *core.Media, codec *core.Codec, track *core
 }
 
 func (c *Backchannel) Start() error {
+	log.Debug().Msg("Backchannel is starting")
+
 	c.wg.Wait()
 	return nil
 }
 
 func (c *Backchannel) Stop() error {
+	log.Debug().Msg("Backchannel is stopping")
+
 	oldSignal := c.quitSignal.Swap(nil)
 	if oldSignal != nil && *oldSignal != nil {
 		select {
 		case *oldSignal <- struct{}{}:
 		default:
 		}
-		close(*oldSignal)
+		log.Debug().Msg("Backchannel has sent quit signal to existing loop")
 	}
 	return nil
 }
