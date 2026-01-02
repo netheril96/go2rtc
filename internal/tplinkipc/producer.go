@@ -2,6 +2,7 @@ package tplinkipc
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -118,9 +119,14 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal 
 		}
 	}()
 
+	var sessionID uint32
+	if err := binary.Read(rand.Reader, binary.LittleEndian, &sessionID); err != nil {
+		return fmt.Errorf("generate session id: %w", err)
+	}
+
 	talk := NewTplinkTalkConnection(
 		bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
-		url.User.Username(), passwd, 0,
+		url.User.Username(), passwd, sessionID,
 	)
 
 	err = talk.Start()
