@@ -96,6 +96,9 @@ func listen(network, address string) {
 		log.Error().Err(err).Msg("[api] listen")
 		return
 	}
+	if network == "unix" {
+		os.Chmod(address, 0770)
+	}
 
 	log.Info().Str("addr", address).Msg("[api] listen")
 
