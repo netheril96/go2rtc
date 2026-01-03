@@ -8,17 +8,52 @@
             background-color: black;
             margin: 0;
             padding: 0;
+            display: flex;
+            flex-direction: column;
         }
 
-        html, body, video {
+        html, body {
             height: 100%;
             width: 100%;
+        }
+
+        video {
+            flex: 1;
+            width: 100%;
+            object-fit: contain;
+        }
+
+        .ptz {
+            display: grid;
+            grid-template-columns: repeat(3, 50px);
+            justify-content: center;
+            padding: 10px;
+        }
+
+        .ptz > button {
+            height: 40px;
+            cursor: pointer;
+            font-size: 20px;
         }
     </style>
 </head>
 <body>
-<video id="video" autoplay controls playsinline muted></video>
+<video id="video" autoplay playsinline></video>
+<div class="ptz">
+    <button style="grid-column: 2" onclick="ptz(0, 0.1, 0)">▲</button>
+    <button style="grid-column: 1; grid-row: 2" onclick="ptz(-0.05, 0, 0)">◀</button>
+    <button style="grid-column: 2; grid-row: 2" onclick="ptz(0, -0.1, 0)">▼</button>
+    <button style="grid-column: 3; grid-row: 2" onclick="ptz(0.05, 0, 0)">▶</button>
+</div>
 <script>
+        function ptz(p, t, z) {
+            const src = new URLSearchParams(location.search).get('src');
+            fetch('api/ptz', {
+                method: 'POST',
+                body: JSON.stringify({ name: src, p: p, t: t, z: z })
+            });
+        }
+
     async function PeerConnection(media) {
         let iceServers = localStorage.getItem('iceServers');
         if (!iceServers) {
