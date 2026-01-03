@@ -20,9 +20,18 @@
 <video id="video" autoplay controls playsinline muted></video>
 <script>
     async function PeerConnection(media) {
-        const pc = new RTCPeerConnection({
-            iceServers: [{urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302']}]
-        });
+        let iceServers = localStorage.getItem('iceServers');
+        if (!iceServers) {
+            const defaults = '[{"urls":["stun:"]}]';
+            iceServers = prompt('ICE servers', defaults);
+            if (iceServers) {
+                localStorage.setItem('iceServers', iceServers);
+            } else {
+                iceServers = defaults;
+            }
+        }
+
+        const pc = new RTCPeerConnection({ iceServers: JSON.parse(iceServers) });
 
         const localTracks = [];
 
