@@ -3,7 +3,6 @@ package ptz
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/app"
@@ -23,7 +22,8 @@ type PTZConfig struct {
 	Name     string `yaml:"name"`
 	HostPort string `yaml:"hostport"`
 	User     string `yaml:"user"`
-	Pass     string `yaml:"pass"`
+	Pass     string `yaml:"password"`
+	Profile  string `yaml:"profile"`
 }
 
 func Init() {
@@ -36,7 +36,11 @@ func Init() {
 
 	log = app.GetLogger("ptz")
 
-	api.HandleFunc("/api/ptz", handleFunc)
+	for name := range ptzs {
+		log.Trace().Str("name", name).Msg("[ptz] load config")
+	}
+
+	api.HandleFunc("api/ptz", handleFunc)
 }
 
 type ptzRequest struct {
@@ -64,9 +68,6 @@ func handleFunc(w http.ResponseWriter, r *http.Request) {
 		Username: conf.User,
 		Password: conf.Pass,
 	}
-	if !strings.HasPrefix(params.Xaddr, "http") {
-		params.Xaddr = "http://" + params.Xaddr
-	}
 
 	dev, err := onvif.NewDevice(params)
 	if err != nil {
@@ -74,17 +75,24 @@ func handleFunc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	getProfilesResponse, err := sdk_media.Call_GetProfiles(r.Context(), dev, media.GetProfiles{})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var token xsd.ReferenceToken
+	if conf.Profile != "" {
+		token = xsd.ReferenceToken(conf.Profile)
+	} else {
+		getProfilesResponse, err := sdk_media.Call_GetProfiles(r.Context(), dev, media.GetProfiles{})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if len(getProfilesResponse.Profiles) == 0 {
+			log.Warn().Str("name", req.Name).Msg("ptz: no profiles found, try setting profile in config")
+			http.Error(w, "no profiles found", http.StatusInternalServerError)
+			return
+		}
+		token = getProfilesResponse.Profiles[0].Token
 	}
 
-	if len(getProfilesResponse.Profiles) == 0 {
-		http.Error(w, "no profiles found", http.StatusInternalServerError)
-		return
-	}
-	token := getProfilesResponse.Profiles[0].Token
 	relMove := ptz.RelativeMove{
 		ProfileToken: token,
 		Translation: xsd.PTZVector{
@@ -96,7 +104,6 @@ func handleFunc(w http.ResponseWriter, r *http.Request) {
 				X: req.Zoom,
 			},
 		},
-		Speed: xsd.PTZSpeed{},
 	}
 	if _, err = sdk_ptz.Call_RelativeMove(r.Context(), dev, relMove); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

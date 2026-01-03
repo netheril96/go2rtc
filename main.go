@@ -33,6 +33,7 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/ngrok"
 	"github.com/AlexxIT/go2rtc/internal/onvif"
 	"github.com/AlexxIT/go2rtc/internal/pinggy"
+	"github.com/AlexxIT/go2rtc/internal/ptz"
 	"github.com/AlexxIT/go2rtc/internal/ring"
 	"github.com/AlexxIT/go2rtc/internal/roborock"
 	"github.com/AlexxIT/go2rtc/internal/rtmp"
@@ -78,6 +79,7 @@ func main() {
 		{"hass", hass.Init},             // hass source, Hass API server
 		{"homekit", homekit.Init},       // homekit source, HomeKit server
 		{"onvif", onvif.Init},           // onvif source, ONVIF API server
+		{"ptz", ptz.Init},
 		{"rtmp", rtmp.Init},             // rtmp source, RTMP server
 		{"webtorrent", webtorrent.Init}, // webtorrent source, WebTorrent module
 		{"wyoming", wyoming.Init},
