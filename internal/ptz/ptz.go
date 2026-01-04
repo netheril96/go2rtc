@@ -3,6 +3,7 @@ package ptz
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/app"
@@ -17,6 +18,8 @@ import (
 
 var log zerolog.Logger
 var ptzs map[string]PTZConfig
+
+var cache sync.Map
 
 type PTZConfig struct {
 	Name     string `yaml:"name"`
@@ -36,8 +39,17 @@ func Init() {
 
 	log = app.GetLogger("ptz")
 
-	for name := range ptzs {
+	for name, conf := range ptzs {
 		log.Trace().Str("name", name).Msg("[ptz] load config")
+
+		params := onvif.DeviceParams{
+			Xaddr:    conf.HostPort,
+			Username: conf.User,
+			Password: conf.Pass,
+		}
+		if dev, err := onvif.NewDevice(params); err == nil {
+			cache.Store(name, dev)
+		}
 	}
 
 	api.HandleFunc("api/ptz", handleFunc)
@@ -48,6 +60,27 @@ type ptzRequest struct {
 	Pan  float64 `json:"p"`
 	Tilt float64 `json:"t"`
 	Zoom float64 `json:"z"`
+}
+
+func getDevice(name string, conf PTZConfig) (*onvif.Device, error) {
+	if v, ok := cache.Load(name); ok {
+		return v.(*onvif.Device), nil
+	}
+
+	params := onvif.DeviceParams{
+		Xaddr:    conf.HostPort,
+		Username: conf.User,
+		Password: conf.Pass,
+	}
+
+	dev, err := onvif.NewDevice(params)
+	if err != nil {
+		return nil, err
+	}
+
+	cache.Store(name, dev)
+
+	return dev, nil
 }
 
 func handleFunc(w http.ResponseWriter, r *http.Request) {
@@ -63,13 +96,7 @@ func handleFunc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params := onvif.DeviceParams{
-		Xaddr:    conf.HostPort,
-		Username: conf.User,
-		Password: conf.Pass,
-	}
-
-	dev, err := onvif.NewDevice(params)
+	dev, err := getDevice(req.Name, conf)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
