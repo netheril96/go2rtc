@@ -17,6 +17,21 @@ class VideoStream extends VideoRTC {
         this.querySelector('.status').innerText = value;
     }
 
+    ptz(p, t, z) {
+        const url = new URL(this.wsURL);
+        if (url.protocol === 'ws:') url.protocol = 'http:';
+        if (url.protocol === 'wss:') url.protocol = 'https:';
+        url.pathname = 'api/ptz';
+
+        const src = url.searchParams.get('src');
+        url.search = '';
+
+        fetch(url, {
+            method: 'POST',
+            body: JSON.stringify({ name: src, p: p, t: t, z: z })
+        });
+    }
+
     /**
      * Custom GUI
      */
@@ -56,15 +71,54 @@ class VideoStream extends VideoRTC {
             justify-content: space-between;
             pointer-events: none;
         }
+        .ptz {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            display: grid;
+            grid-template-columns: repeat(3, 30px);
+            gap: 5px;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        video-stream:hover .ptz {
+            opacity: 1;
+        }
+        .ptz > button {
+            height: 30px;
+            cursor: pointer;
+            background-color: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            font-size: 16px;
+        }
+        .ptz > button:hover {
+            background-color: rgba(255, 255, 255, 0.5);
+            color: black;
+        }
         </style>
         <div class="info">
             <div class="status"></div>
             <div class="mode"></div>
         </div>
+        <div class="ptz">
+            <button style="grid-column: 2" data-ptz="0,0.1,0">▲</button>
+            <button style="grid-column: 1; grid-row: 2" data-ptz="-0.05,0,0">◀</button>
+            <button style="grid-column: 2; grid-row: 2" data-ptz="0,-0.1,0">▼</button>
+            <button style="grid-column: 3; grid-row: 2" data-ptz="0.05,0,0">▶</button>
+        </div>
         `;
 
         const info = this.querySelector('.info');
         this.insertBefore(this.video, info);
+
+        this.querySelector('.ptz').addEventListener('click', ev => {
+            const btn = ev.target.closest('button');
+            if (btn) {
+                const args = btn.dataset.ptz.split(',').map(parseFloat);
+                this.ptz(...args);
+            }
+        });
     }
 
     onconnect() {
