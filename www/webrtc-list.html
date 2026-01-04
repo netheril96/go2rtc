@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC List</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+        #container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        a {
+            display: block;
+            margin-bottom: 5px;
+            text-decoration: none;
+            color: #007bff;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebRTC列表</h1>
+    <div id="container">Loading...</div>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const isTest = urlParams.get('test') === 'true';
+        const promise = isTest
+            ? Promise.resolve({'客厅': {}, '餐厅': {}, '厨房': {}})
+            : fetch('api/streams').then(r => r.json());
+
+        promise.then(data => {
+            const container = document.getElementById('container');
+            container.innerHTML = '';
+            Object.keys(data).forEach(key => {
+                const a1 = document.createElement('a');
+                a1.href = `stream.html?mode=webrtc&src=${encodeURIComponent(key)}`;
+                a1.innerText = key;
+                container.appendChild(a1);
+
+                const a2 = document.createElement('a');
+                a2.href = `stream.html?mode=webrtc&src=${encodeURIComponent(key)}&microphone=true`;
+                a2.innerText = `${key} (对讲)`;
+                container.appendChild(a2);
+            });
+        }).catch(e => {
+            document.getElementById('container').innerText = 'Error: ' + e;
+        });
+    </script>
+</body>
+</html>
