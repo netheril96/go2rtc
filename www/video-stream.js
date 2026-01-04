@@ -1,4 +1,4 @@
-import {VideoRTC} from './video-rtc.js';
+import { VideoRTC } from './video-rtc.js';
 
 /**
  * This is example, how you can extend VideoRTC player for your app.
@@ -21,6 +21,22 @@ class VideoStream extends VideoRTC {
      * Custom GUI
      */
     oninit() {
+        let iceServers = localStorage.getItem('iceServers');
+        if (!iceServers) {
+            const defaults = '[{"urls":["stun:"]}]';
+            iceServers = prompt('ICE servers', defaults);
+            if (iceServers) {
+                localStorage.setItem('iceServers', iceServers);
+            } else {
+                iceServers = defaults;
+            }
+        }
+        this.pcConfig.iceServers = JSON.parse(iceServers);
+
+        if (new URLSearchParams(location.search).get('microphone') === 'true') {
+            this.media = 'video,audio,microphone';
+        }
+
         console.debug('stream.oninit');
         super.oninit();
 

@@ -268,14 +268,6 @@ export class VideoRTC extends HTMLElement {
             if (this.ws) this.ws.close(); // run reconnect for broken MSE stream
         });
 
-        // all Safari lies about supported audio codecs
-        const m = window.navigator.userAgent.match(/Version\/(\d+).+Safari/);
-        if (m) {
-            // AAC from v13, FLAC from v14, OPUS - unsupported
-            const skip = m[1] < '13' ? 'mp4a.40.2' : m[1] < '14' ? 'flac' : 'opus';
-            this.CODECS.splice(this.CODECS.indexOf(skip));
-        }
-
         if (this.background) return;
 
         if ('hidden' in document && this.visibilityCheck) {
