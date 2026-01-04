@@ -59,6 +59,9 @@ class VideoStream extends VideoRTC {
         <style>
         video-stream {
             position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         .info {
             position: absolute;
@@ -72,17 +75,11 @@ class VideoStream extends VideoRTC {
             pointer-events: none;
         }
         .ptz {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
             display: grid;
             grid-template-columns: repeat(3, 30px);
             gap: 5px;
-            opacity: 0;
-            transition: opacity 0.5s;
-        }
-        video-stream:hover .ptz {
-            opacity: 1;
+            justify-content: center;
+            padding: 10px;
         }
         .ptz > button {
             height: 30px;
@@ -111,6 +108,7 @@ class VideoStream extends VideoRTC {
 
         const info = this.querySelector('.info');
         this.insertBefore(this.video, info);
+        this.video.style.height = 'auto';
 
         this.querySelector('.ptz').addEventListener('click', ev => {
             const btn = ev.target.closest('button');
