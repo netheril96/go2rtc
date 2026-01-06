@@ -3,6 +3,7 @@ package webrtc
 import (
 	"errors"
 	"net"
+	"os/exec"
 	"strings"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
@@ -11,6 +12,7 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/webrtc"
+	"github.com/pion/ice/v4"
 	pion "github.com/pion/webrtc/v4"
 	"github.com/rs/zerolog"
 )
@@ -193,7 +195,43 @@ func asyncHandler(tr *ws.Transport, msg *ws.Message) (err error) {
 			s := msg.ToJSON().Candidate
 			log.Trace().Str("candidate", s).Msg("[webrtc] local ")
 			tr.Write(&ws.Message{Type: "webrtc/candidate", Value: s})
+
+		case webrtc.AddCandidateRequest:
+			candidateValue := strings.TrimPrefix(msg.Candidate, "candidate:")
+
+			if candidateValue == "" {
+				log.Trace().Msg("[webrtc] ignore empty candidate")
+				return
+			}
+
+			cand, err := ice.UnmarshalCandidate(candidateValue)
+			if err != nil {
+				log.Warn().Err(err).Caller().Send()
+				return
+			}
+
+			if ip := net.ParseIP(cand.Address()); ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
+				if ip4 := ip.To4(); ip4 != nil {
+					if err := exec.Command("nft", "add", "element", "inet", "filter", "webrtc_clients4", "{", ip4.String(), "timeout", "30s", "}").Run(); err != nil {
+						log.Warn().Err(err).Str("address", cand.Address()).Msg("[webrtc] nft add4")
+					} else {
+						log.Debug().Str("address", cand.Address()).Msg("[webrtc] added firewall rules")
+					}
+				} else {
+					if err := exec.Command("nft", "add", "element", "inet", "filter", "webrtc_clients6", "{", ip.String(), "timeout", "30s", "}").Run(); err != nil {
+						log.Warn().Err(err).Str("address", cand.Address()).Msg("[webrtc] nft add6")
+					} else {
+						log.Debug().Str("address", cand.Address()).Msg("[webrtc] added firewall rules")
+					}
+				}
+			} else {
+				log.Debug().Str("address", cand.Address()).Msg("[webrtc] skipping adding firewall rules")
+			}
+
+		default:
+			log.Error().Interface("msg", msg).Msg("[webrtc] unknown msg")
 		}
+
 	})
 
 	log.Trace().Msgf("[webrtc] offer:\n%s", offer.SDP)
