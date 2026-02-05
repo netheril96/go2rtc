@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -215,11 +216,53 @@ func isLoopback(remoteAddr string) bool {
 func middlewareAuth(username, password string, localAuth bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if localAuth || !isLoopback(r.RemoteAddr) {
+			const cookieName = "go2rtc-auth"
+
+			if cookie, err := r.Cookie(cookieName); err == nil {
+				if b, err := base64.RawURLEncoding.DecodeString(cookie.Value); err == nil {
+					var s struct {
+						User string `json:"user"`
+						Pass string `json:"pass"`
+						Time int64  `json:"time"`
+					}
+					if json.Unmarshal(b, &s) == nil && s.User == username && s.Pass == password {
+						if time.Since(time.Unix(s.Time, 0)) > 7*24*time.Hour {
+							s.Time = time.Now().Unix()
+							if b, err := json.Marshal(s); err == nil {
+								http.SetCookie(w, &http.Cookie{
+									Name:   cookieName,
+									Value:  base64.RawURLEncoding.EncodeToString(b),
+									Path:   "/",
+									MaxAge: 31536000,
+								})
+							}
+						}
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+			}
+
 			user, pass, ok := r.BasicAuth()
 			if !ok || user != username || pass != password {
 				w.Header().Set("Www-Authenticate", `Basic realm="go2rtc"`)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
+			}
+
+			s := struct {
+				User string `json:"user"`
+				Pass string `json:"pass"`
+				Time int64  `json:"time"`
+			}{user, pass, time.Now().Unix()}
+
+			if b, err := json.Marshal(s); err == nil {
+				http.SetCookie(w, &http.Cookie{
+					Name:   cookieName,
+					Value:  base64.RawURLEncoding.EncodeToString(b),
+					Path:   "/",
+					MaxAge: 31536000,
+				})
 			}
 		}
 
