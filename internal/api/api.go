@@ -230,10 +230,12 @@ func middlewareAuth(username, password string, localAuth bool, next http.Handler
 							s.Time = time.Now().Unix()
 							if b, err := json.Marshal(s); err == nil {
 								http.SetCookie(w, &http.Cookie{
-									Name:   cookieName,
-									Value:  base64.RawURLEncoding.EncodeToString(b),
-									Path:   "/",
-									MaxAge: 31536000,
+									Name:     cookieName,
+									Value:    base64.RawURLEncoding.EncodeToString(b),
+									Path:     "/",
+									MaxAge:   31536000,
+									HttpOnly: true,
+									SameSite: http.SameSiteLaxMode,
 								})
 							}
 						}
@@ -245,7 +247,10 @@ func middlewareAuth(username, password string, localAuth bool, next http.Handler
 
 			user, pass, ok := r.BasicAuth()
 			if !ok || user != username || pass != password {
-				w.Header().Set("Www-Authenticate", `Basic realm="go2rtc"`)
+				// only show basic auth dialog for HTML requests (page navigation)
+				if strings.Contains(r.Header.Get("Accept"), "text/html") {
+					w.Header().Set("Www-Authenticate", `Basic realm="go2rtc"`)
+				}
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -258,10 +263,12 @@ func middlewareAuth(username, password string, localAuth bool, next http.Handler
 
 			if b, err := json.Marshal(s); err == nil {
 				http.SetCookie(w, &http.Cookie{
-					Name:   cookieName,
-					Value:  base64.RawURLEncoding.EncodeToString(b),
-					Path:   "/",
-					MaxAge: 31536000,
+					Name:     cookieName,
+					Value:    base64.RawURLEncoding.EncodeToString(b),
+					Path:     "/",
+					MaxAge:   31536000,
+					HttpOnly: true,
+					SameSite: http.SameSiteLaxMode,
 				})
 			}
 		}
