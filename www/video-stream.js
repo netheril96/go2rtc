@@ -36,17 +36,12 @@ class VideoStream extends VideoRTC {
      * Custom GUI
      */
     oninit() {
-        let iceServers = localStorage.getItem('iceServers');
-        if (!iceServers) {
-            const defaults = '[{"urls":["stun:"]}]';
-            iceServers = prompt('ICE servers', defaults);
-            if (iceServers) {
-                localStorage.setItem('iceServers', iceServers);
-            } else {
-                iceServers = defaults;
-            }
+        if (!VideoStream.iceServersPromise) {
+            VideoStream.iceServersPromise = fetch('api/webrtc/ice').then(r => {
+                if (!r.ok) throw new Error('API error ' + r.status);
+                return r.json();
+            });
         }
-        this.pcConfig.iceServers = JSON.parse(iceServers);
 
         if (new URLSearchParams(location.search).get('microphone') === 'true') {
             this.media = 'video,audio,microphone';
@@ -124,6 +119,15 @@ class VideoStream extends VideoRTC {
         const result = super.onconnect();
         if (result) this.divMode = 'loading';
         return result;
+    }
+
+    onwebrtc() {
+        VideoStream.iceServersPromise.then(iceServers => {
+            this.pcConfig.iceServers = iceServers;
+            super.onwebrtc();
+        }).catch(e => {
+            this.divError = 'ICE servers: ' + e.message;
+        });
     }
 
     ondisconnect() {

@@ -3,6 +3,7 @@ package webrtc
 import (
 	"errors"
 	"net"
+	"net/http"
 	"os/exec"
 	"strings"
 
@@ -105,6 +106,11 @@ func Init() {
 
 	// sync WebRTC server (two API versions)
 	api.HandleFunc("api/webrtc", syncHandler)
+
+	api.HandleFunc("api/webrtc/ice", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		api.ResponseJSON(w, cfg.Mod.IceServers)
+	})
 
 	// WebRTC client
 	streams.HandleFunc("webrtc", streamsHandler)
