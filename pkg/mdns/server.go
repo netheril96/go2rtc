@@ -149,14 +149,27 @@ func AppendEntry(msg *dns.Msg, entry *ServiceEntry, service string, ip net.IP) {
 			Port:   entry.Port, // 8123
 			Target: srvName,    // 963f1fa82b7142809711cebe7c826322.local.
 		},
-		&dns.A{
+	)
+
+	if ip4 := ip.To4(); ip4 != nil {
+		msg.Extra = append(msg.Extra, &dns.A{
 			Hdr: dns.RR_Header{
 				Name:   srvName,         // 963f1fa82b7142809711cebe7c826322.local.
 				Rrtype: dns.TypeA,       // 1
 				Class:  ClassCacheFlush, // 32769
 				Ttl:    120,
 			},
-			A: ip,
-		},
-	)
+			A: ip4,
+		})
+	} else {
+		msg.Extra = append(msg.Extra, &dns.AAAA{
+			Hdr: dns.RR_Header{
+				Name:   srvName,
+				Rrtype: dns.TypeAAAA,
+				Class:  ClassCacheFlush,
+				Ttl:    120,
+			},
+			AAAA: ip,
+		})
+	}
 }

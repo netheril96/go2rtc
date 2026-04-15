@@ -48,10 +48,7 @@ func IPNets(ipFilter func(ip net.IP) bool) ([]*net.IPNet, error) {
 		for _, addr := range addrs {
 			switch v := addr.(type) {
 			case *net.IPNet:
-				ip := v.IP.To4()
-				if ip == nil {
-					continue
-				}
+				ip := v.IP
 				if ipFilter != nil && !ipFilter(ip) {
 					continue
 				}
