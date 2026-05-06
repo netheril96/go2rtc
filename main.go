@@ -76,9 +76,9 @@ func main() {
 		{"hls", hls.Init},     // HLS API
 		{"mjpeg", mjpeg.Init}, // MJPEG API
 		// Other sources and servers
-		{"hass", hass.Init},             // hass source, Hass API server
-		{"homekit", homekit.Init},       // homekit source, HomeKit server
-		{"onvif", onvif.Init},           // onvif source, ONVIF API server
+		{"hass", hass.Init},       // hass source, Hass API server
+		{"homekit", homekit.Init}, // homekit source, HomeKit server
+		{"onvif", onvif.Init},     // onvif source, ONVIF API server
 		{"ptz", ptz.Init},
 		{"rtmp", rtmp.Init},             // rtmp source, RTMP server
 		{"webtorrent", webtorrent.Init}, // webtorrent source, WebTorrent module

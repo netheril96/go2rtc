@@ -24,10 +24,6 @@ type Conn struct {
 	closed core.Waiter
 }
 
-type AddCandidateRequest struct {
-	Candidate string `json:"candidate"`
-}
-
 func NewConn(pc *webrtc.PeerConnection) *Conn {
 	c := &Conn{
 		Connection: core.Connection{
@@ -162,9 +158,7 @@ func (c *Conn) Close() error {
 
 func (c *Conn) AddCandidate(candidate string) error {
 	// pion uses only candidate value from json/object candidate struct
-	err := c.pc.AddICECandidate(webrtc.ICECandidateInit{Candidate: candidate})
-	c.Fire(AddCandidateRequest{Candidate: candidate})
-	return err
+	return c.pc.AddICECandidate(webrtc.ICECandidateInit{Candidate: candidate})
 }
 
 func (c *Conn) GetSenderTrack(mid string) *Track {
