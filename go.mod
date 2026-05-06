@@ -36,8 +36,7 @@ require (
 	github.com/elgs/gostrgen v0.0.0-20161222160715-9d61ae07eeae // indirect
 	github.com/gofrs/uuid v3.2.0+incompatible // indirect
 	github.com/juju/errors v0.0.0-20220331221717-b38fca44723b // indirect
-	github.com/kr/pretty v0.3.1 // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
@@ -47,9 +46,9 @@ require (
 	github.com/pion/turn/v4 v4.1.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/mod v0.32.0 // indirect
+	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
+	golang.org/x/time v0.10.0 // indirect
+	golang.org/x/tools v0.40.0 // indirect
 )

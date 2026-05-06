@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"os/exec"
 	"strings"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
