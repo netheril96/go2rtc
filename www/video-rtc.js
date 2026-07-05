@@ -163,7 +163,10 @@ export class VideoRTC extends HTMLElement {
      * Play video. Support automute when autoplay blocked.
      * https://developer.chrome.com/blog/autoplay/
      */
-    play() {
+    play(forceUnmute = false) {
+        if (forceUnmute) {
+            this.video.muted = false;
+        }
         this.video.play().catch(() => {
             if (!this.video.muted) {
                 this.video.muted = true;
@@ -238,7 +241,8 @@ export class VideoRTC extends HTMLElement {
      */
     oninit() {
         this.video = document.createElement('video');
-        this.video.controls = true;
+        this.video.controls = false;
+        this.video.autoplay = true;
         this.video.playsInline = true;
         this.video.preload = 'auto';
 
@@ -247,6 +251,8 @@ export class VideoRTC extends HTMLElement {
         this.video.style.height = '100%';
 
         this.appendChild(this.video);
+
+        this.addEventListener('click', () => this.play(true));
 
         this.video.addEventListener('error', ev => {
             const err = this.video.error;
@@ -593,6 +599,7 @@ export class VideoRTC extends HTMLElement {
                 rtcPriority += isH265Supported ? 0x240 : 0x220;
             }
             if (stream.getAudioTracks().length > 0) rtcPriority += 0x102;
+            if (this.media.includes('microphone')) rtcPriority += 0x1000;
 
             if (this.mseCodecs.includes('hvc1.')) msePriority += 0x230;
             if (this.mseCodecs.includes('avc1.')) msePriority += 0x210;
