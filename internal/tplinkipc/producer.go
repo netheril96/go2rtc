@@ -80,7 +80,8 @@ func loop(url *url.URL, codec *core.Codec, decodedPcm <-chan []byte, quitSignal 
 	ffmpegCmd := exec.Command(
 		"ffmpeg",
 		"-hide_banner", "-v", "error",
-		"-fflags", "nobuffer", "-flags", "low_delay",
+		"-probesize", "32", "-analyzeduration", "0",
+		"-fflags", "nobuffer", "-flags", "low_delay", "-flush_packets", "1",
 		"-f", "s16le", "-ar", fmt.Sprint(codec.ClockRate), "-ac", fmt.Sprint(codec.Channels), "-i", "-",
 		"-f", "mulaw", "-ar", "16000", "-ac", "1", "-",
 	)
